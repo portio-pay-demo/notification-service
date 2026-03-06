@@ -81,3 +81,5 @@ export class SmsProcessor {
     logger.info({ idempotencyKey, to }, 'SMS delivered');
   }
 }
+
+// NP-2 WIP: deduplication via Redis delivery receipt
