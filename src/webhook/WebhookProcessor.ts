@@ -94,3 +94,5 @@ export class WebhookProcessor {
     logger.info({ deliveryId, status: response.status }, 'Webhook delivered');
   }
 }
+
+// NP-6 fix: BullMQ DLQ + backpressure — no more silent event drops
