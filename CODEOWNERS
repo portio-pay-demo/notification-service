@@ -1,0 +1,10 @@
+# PortIOPay notification-service CODEOWNERS
+# Requires 1 reviewer + code owner approval before merge
+
+* @notifications-team
+
+# SMS provider integration — requires sms-leads sign-off
+src/sms/ @sms-leads @notifications-team
+
+# Email templates and provider — requires email-leads sign-off
+src/email/ @email-leads @notifications-team
