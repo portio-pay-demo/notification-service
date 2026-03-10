@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- Hello world
+- Hello world, testing claude code review
 
 ## [1.8.3] - 2024-12-07
 ### Initial
