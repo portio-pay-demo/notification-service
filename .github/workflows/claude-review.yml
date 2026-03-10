@@ -5,5 +5,9 @@ on:
 
 jobs:
   review:
+    permissions:
+      contents: read
+      pull-requests: write
+      id-token: write
     uses: portio-pay-demo/platform-workflows/.github/workflows/claude-code-review-base.yml@main
     secrets: inherit  # passes ANTHROPIC_API_KEY through automatically
