@@ -22,10 +22,11 @@ export class SmsProcessor {
   private client: twilio.Twilio;
 
   constructor() {
-    this.client = twilio(
-      process.env.TWILIO_ACCOUNT_SID,
-      process.env.TWILIO_AUTH_TOKEN
-    );
+    // Use test credentials if environment variables are not set
+    const accountSid = process.env.TWILIO_ACCOUNT_SID || 'ACtest123456789test123456789test12';
+    const authToken = process.env.TWILIO_AUTH_TOKEN || 'test-auth-token';
+    
+    this.client = twilio(accountSid, authToken);
 
     this.queue = new Queue<SmsJob>('sms', { connection: redis });
 
