@@ -5,5 +5,5 @@ on:
 
 jobs:
   review:
-    uses: port-io-pay/platform-workflows/.github/workflows/claude-code-review-base.yml@main
+    uses: portio-pay-demo/platform-workflows/.github/workflows/claude-code-review-base.yml@main
     secrets: inherit  # passes ANTHROPIC_API_KEY through automatically
