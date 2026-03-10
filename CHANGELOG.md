@@ -15,3 +15,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.8.3] - 2024-12-07
 ### Initial
 - Project setup and basic notification service functionality
+- Claude code review test
