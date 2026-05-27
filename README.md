@@ -1,47 +1,102 @@
-# notification-service
+# PortIOPay Notification Service
 
-Multi-channel notification delivery service for PortIOPay. Handles SMS, email, and webhook delivery for payment events with intelligent batching, retry logic, and dead-letter queue support.
+Multi-channel notification delivery service for [PortIOPay](https://github.com/portio-pay-demo). Handles **SMS** (Twilio) and **webhook** delivery for payment events via **BullMQ** queues on **Redis**, with idempotent SMS retries, webhook dead-letter queue support, and backpressure handling.
 
-## Overview
+| | |
+|---|---|
+| **Repository** | `portio-pay-demo/notification-service` |
+| **Runtime** | Node.js 20+ |
+| **Language** | TypeScript |
+| **Default port** | `3001` |
 
-**Tech Stack:** Node.js 20, TypeScript, BullMQ (Redis), SendGrid, Twilio, PostgreSQL
+## Tech stack
 
-## Key Features
+| Layer | Technology |
+|-------|------------|
+| Runtime | Node.js 20+ |
+| HTTP | Express 4 |
+| Queues | BullMQ 5, ioredis |
+| SMS | Twilio |
+| Logging | Pino |
 
-- SMS via Twilio with idempotent retry (circuit breaker, deduplication key)
-- Email via SendGrid with template rendering
-- Webhook delivery with dead-letter queue (NP-2033 fix: backpressure handling)
-- Intelligent batching: configurable per channel (email: 100, SMS: 50, push: 500)
-- Memory-safe event processor — fixed closure leak (NP-2032)
+## Prerequisites
 
-## Local Development
+- Node.js 20+
+- Redis 6+ (required for BullMQ)
+- Twilio credentials (required when processing SMS jobs)
+
+## Local development
 
 ```bash
+git clone https://github.com/portio-pay-demo/notification-service.git
+cd notification-service
 npm install
+cp .env.example .env   # fill in values
 npm run dev
 ```
 
-Requires: Node.js 20+, Redis, PostgreSQL
+Build and run production output:
 
 ```bash
-docker compose up -d
-npm run dev
+npm run build
+npm start
 ```
+
+## Environment variables
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `PORT` | HTTP listen port | `3001` |
+| `LOG_LEVEL` | Pino log level | `info` |
+| `REDIS_HOST` | Redis hostname | `localhost` |
+| `REDIS_PORT` | Redis port | `6379` |
+| `TWILIO_ACCOUNT_SID` | Twilio account SID | — |
+| `TWILIO_AUTH_TOKEN` | Twilio auth token | — |
+| `TWILIO_FROM_NUMBER` | Sender phone number | — |
+
+Copy `.env.example` to `.env` for local development. Never commit secrets.
 
 ## API
 
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/health` | Service health check |
+| `GET` | `/api/v1/notifications/:id/status` | Notification delivery status |
+
+SMS and webhook jobs are enqueued through `SmsProcessor` and `WebhookProcessor` (BullMQ workers started at boot).
+
+## Project structure
+
 ```
-POST /api/v1/notifications/send
-POST /api/v1/webhooks/register
-POST /api/v1/webhooks/test
-GET  /api/v1/notifications/{id}/status
-GET  /health
+src/
+  index.ts              # Express app entrypoint
+  sms/SmsProcessor.ts   # Twilio SMS worker
+  webhook/WebhookProcessor.ts
+  shared/               # Router, Redis, logger
 ```
+
+## Scripts
+
+| Command | Description |
+|---------|-------------|
+| `npm run dev` | Start with hot reload (`tsx watch`) |
+| `npm run build` | Compile TypeScript to `dist/` |
+| `npm start` | Run compiled `dist/index.js` |
+| `npm test` | Run Jest tests |
+| `npm run lint` | ESLint on `src/` |
 
 ## Ownership
 
-- Team: **PortIOPay Payments**
-- CODEOWNERS: `@notifications-team`, `@sms-leads`, `@email-leads`
-- On-call: PagerDuty service `portioapay-notifications-prod`
+Code ownership is defined in [`CODEOWNERS`](./CODEOWNERS):
 
-hello world
+| Path | Reviewers |
+|------|-----------|
+| `*` | `@notifications-team` |
+| `src/sms/` | `@sms-leads`, `@notifications-team` |
+| `src/webhook/` | `@notifications-team` |
+| `src/email/` | `@email-leads`, `@notifications-team` (planned) |
+
+- **Team:** PortIOPay Payments
+- **On-call:** PagerDuty `portioapay-notifications-prod`
+
+Pull requests require approval from the relevant code owners.
