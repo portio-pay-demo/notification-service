@@ -1,6 +1,6 @@
-# notification-service
+# PortIOPay Notification Service
 
-Multi-channel notification delivery service for PortIOPay. Handles SMS, email, and webhook delivery for payment events with intelligent batching, retry logic, and dead-letter queue support.
+Multi-channel notification delivery service for PortIOPay. Handles SMS and webhook delivery for payment events with queue-based processing, retry logic, and dead-letter queue support.
 
 ## Overview
 
@@ -18,15 +18,11 @@ Multi-channel notification delivery service for PortIOPay. Handles SMS, email, a
 
 ```bash
 npm install
+cp .env.example .env   # configure Redis and Twilio credentials
 npm run dev
 ```
 
-Requires: Node.js 20+, Redis, PostgreSQL
-
-```bash
-docker compose up -d
-npm run dev
-```
+Requires: Node.js 20+, Redis
 
 ## API
 
@@ -40,8 +36,9 @@ GET  /health
 
 ## Ownership
 
+Code ownership is defined in [`CODEOWNERS`](./CODEOWNERS).
+
 - Team: **PortIOPay Payments**
-- CODEOWNERS: `@notifications-team`, `@sms-leads`, `@email-leads`
 - On-call: PagerDuty service `portioapay-notifications-prod`
 
-hello world
+Pull requests require approval from the relevant code owners.
