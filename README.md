@@ -1,58 +1,24 @@
 # PortIOPay Notification Service
 
-Multi-channel notification delivery service for [PortIOPay](https://github.com/portio-pay-demo). It handles outbound **SMS** (Twilio) and **webhook** delivery for payment events, exposes a small HTTP API for health checks and notification status, and processes work asynchronously through **BullMQ** queues backed by **Redis** — with idempotent SMS retries, webhook dead-letter queue support, and backpressure handling.
+Multi-channel notification delivery service for [PortIOPay](https://github.com/portio-pay-demo). Processes **SMS** (Twilio) and **merchant webhooks** for payment-related events using **BullMQ** workers backed by **Redis**, with idempotent SMS retries, webhook dead-letter queue (DLQ) support, and queue backpressure handling.
 
 | | |
 |---|---|
-| **Repository** | `portio-pay-demo/notification-service` |
+| **Repository** | [portio-pay-demo/notification-service](https://github.com/portio-pay-demo/notification-service) |
 | **Runtime** | Node.js 20+ |
 | **Language** | TypeScript |
 | **Default port** | `3001` |
+| **Version** | `1.8.3` (see `package.json`) |
 
-## Table of contents
-
-- [Architecture](#architecture)
-- [Tech stack](#tech-stack)
-- [Prerequisites](#prerequisites)
-- [Local development](#local-development)
-- [Environment variables](#environment-variables)
-- [API reference](#api-reference)
-- [Background processors](#background-processors)
-- [Project structure](#project-structure)
-- [Scripts](#scripts)
-- [Deployment](#deployment)
-- [Ownership](#ownership)
-- [Related fixes](#related-fixes)
-
-## Architecture
-
-The service exposes a small HTTP API for health checks and delivery status, and runs background workers that process notification jobs from BullMQ queues. SMS messages are sent via Twilio; webhooks are delivered over HTTP with automatic retries and DLQ routing on failure.
-
-```
-┌─────────────┐     HTTP      ┌──────────────────────────┐
-│   Clients   │──────────────▶│  notification-service    │
-│  / upstream │               │  (Express, port 3001)    │
-└─────────────┘               └────────────┬─────────────┘
-                                           │
-                              ┌────────────┴─────────────┐
-                              │         Redis            │
-                              │  (BullMQ job queues)     │
-                              └────────────┬─────────────┘
-                                           │
-                    ┌──────────────────────┼──────────────────────┐
-                    ▼                      ▼                      ▼
-             ┌────────────┐        ┌────────────┐        ┌────────────┐
-             │ SmsProcessor│        │WebhookProc.│        │ webhooks-  │
-             │  (Twilio)  │        │  (HTTP)    │        │    dlq     │
-             └────────────┘        └────────────┘        └────────────┘
-```
+## What it does
 
 On startup, the service:
 
-1. Starts **WebhookProcessor** and **SmsProcessor** workers (BullMQ).
-2. Listens for HTTP traffic on `PORT` (default `3001`).
+1. Starts an **Express** HTTP server for health checks and status queries.
+2. Starts **BullMQ workers** for SMS (`SmsProcessor`) and webhooks (`WebhookProcessor`).
+3. Connects to **Redis** for queues, job deduplication, and SMS delivery receipts.
 
-SMS and webhook jobs are enqueued programmatically via the processor classes (`enqueue` methods). Additional HTTP routes for send/register flows may be added under `src/shared/router.ts`.
+Upstream services enqueue work by calling the processor APIs in-process (or via future HTTP routes). SMS jobs use an **idempotency key** stored in Redis to prevent duplicate sends on retry. Webhook jobs move to a **DLQ** after max retries and reject new work when the queue exceeds a depth threshold.
 
 ## Tech stack
 
@@ -60,264 +26,149 @@ SMS and webhook jobs are enqueued programmatically via the processor classes (`e
 |-------|------------|
 | Runtime | Node.js 20+ |
 | Language | TypeScript 5 |
-| HTTP server | [Express](https://expressjs.com/) 4 |
-| Job queues | [BullMQ](https://docs.bullmq.io/) 5 + [ioredis](https://github.com/redis/ioredis) |
-| SMS provider | [Twilio](https://www.twilio.com/) |
-| Logging | [Pino](https://getpino.io/) |
-| Validation | [Zod](https://zod.dev/) (dependencies) |
+| HTTP | Express 4 |
+| Job queues | BullMQ 5, ioredis |
+| SMS | Twilio |
+| Logging | Pino, pino-http |
+| Validation | Zod (dependencies; extend as routes grow) |
 
-Additional libraries in `package.json` (SendGrid, PostgreSQL) support planned email and persistence features; the current implementation focuses on SMS and webhook delivery via Redis queues.
+`package.json` also lists SendGrid and PostgreSQL clients for planned email and persistence features; the current `src/` tree implements SMS and webhooks only.
 
 ## Prerequisites
 
-- **Node.js** 20 or later (`engines` in `package.json`)
-- **Redis** 6+ reachable from the app (required for BullMQ)
-- **Twilio** account credentials (required when processing SMS jobs)
-- **npm** (ships with Node.js)
+- **Node.js** 20 or newer
+- **Redis** 6+ (required for BullMQ)
+- **Twilio** account (required when the SMS worker processes jobs)
 
 ## Local development
-
-### 1. Clone and install
 
 ```bash
 git clone https://github.com/portio-pay-demo/notification-service.git
 cd notification-service
 npm install
-```
-
-### 2. Start Redis
-
-If Redis is not already running locally:
-
-```bash
-docker run -d --name notification-redis -p 6379:6379 redis:7-alpine
-```
-
-Or install and start Redis via your OS package manager.
-
-### 3. Configure environment
-
-Create a `.env` file in the project root (see [Environment variables](#environment-variables)). At minimum for local SMS testing:
-
-```bash
-TWILIO_ACCOUNT_SID=your_account_sid
-TWILIO_AUTH_TOKEN=your_auth_token
-TWILIO_FROM_NUMBER=+15551234567
-```
-
-### 4. Run the service
-
-**Development** (hot reload via `tsx`):
-
-```bash
+cp .env.example .env   # set Twilio and Redis values
 npm run dev
 ```
 
-**Production build**:
+The dev server listens on `http://localhost:3001` (or `PORT` from the environment) and reloads on file changes via `tsx watch`.
+
+Build and run the compiled service:
 
 ```bash
 npm run build
 npm start
 ```
 
-The service listens on `http://localhost:3001` by default.
+### Scripts
 
-### 5. Verify
-
-```bash
-curl http://localhost:3001/health
-```
-
-Expected response:
-
-```json
-{
-  "status": "ok",
-  "service": "notification-service",
-  "version": "1.8.3"
-}
-```
+| Command | Description |
+|---------|-------------|
+| `npm run dev` | Start with hot reload (`tsx watch src/index.ts`) |
+| `npm run build` | Compile TypeScript to `dist/` |
+| `npm start` | Run `node dist/index.js` |
+| `npm test` | Run Jest tests |
+| `npm run test:coverage` | Jest with coverage |
+| `npm run lint` | ESLint on `src/**/*.ts` |
 
 ## Environment variables
 
-| Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `PORT` | No | `3001` | HTTP server port |
-| `LOG_LEVEL` | No | `info` | Pino log level (`debug`, `info`, `warn`, `error`) |
-| `REDIS_HOST` | No | `localhost` | Redis host for BullMQ |
-| `REDIS_PORT` | No | `6379` | Redis port |
-| `TWILIO_ACCOUNT_SID` | Yes (SMS) | — | Twilio account SID |
-| `TWILIO_AUTH_TOKEN` | Yes (SMS) | — | Twilio auth token |
-| `TWILIO_FROM_NUMBER` | Yes (SMS) | — | Twilio sender phone number (E.164) |
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `PORT` | HTTP listen port | `3001` |
+| `LOG_LEVEL` | Pino log level (`debug`, `info`, `warn`, `error`) | `info` |
+| `REDIS_HOST` | Redis hostname | `localhost` |
+| `REDIS_PORT` | Redis port | `6379` |
+| `TWILIO_ACCOUNT_SID` | Twilio account SID | — (required for SMS) |
+| `TWILIO_AUTH_TOKEN` | Twilio auth token | — (required for SMS) |
+| `TWILIO_FROM_NUMBER` | E.164 sender number for outbound SMS | — (required for SMS) |
 
-Store secrets in `.env` locally (`.env` and `.env.local` are gitignored). Do not commit credentials.
+Copy [`.env.example`](./.env.example) to `.env` for local development. Do not commit secrets.
 
-## API reference
+## API (HTTP)
 
-Base path for versioned routes: `/api/v1`
-
-### Implemented routes
+All routes are mounted under `/api/v1` except `/health`.
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/health` | Liveness check; returns service name and version |
-| `GET` | `/api/v1/notifications/:id/status` | Returns delivery status for a notification ID (stub returns `delivered`) |
+| `GET` | `/health` | Liveness: `{ status, service, version }` |
+| `GET` | `/api/v1/notifications/:id/status` | Delivery status for a notification ID (stub returns `delivered`) |
 
-**Example — notification status**
+### Background processing (programmatic)
 
-```bash
-curl http://localhost:3001/api/v1/notifications/ntf_abc123/status
+Jobs are enqueued through TypeScript classes started in `src/index.ts`:
+
+| Component | Queue name | Purpose |
+|-----------|------------|---------|
+| `SmsProcessor` | `sms` | Send SMS via Twilio; dedupe by `idempotencyKey`; 3 attempts, exponential backoff |
+| `WebhookProcessor` | `webhooks` | POST JSON to merchant URLs; DLQ `webhooks-dlq` after failures; backpressure at 50k depth |
+
+**SMS job payload** (`SmsProcessor.enqueue`):
+
+```ts
+{ to: string; message: string; merchantId: string; idempotencyKey: string }
 ```
 
-```json
-{
-  "id": "ntf_abc123",
-  "status": "delivered"
-}
+**Webhook job payload** (`WebhookProcessor.enqueue`):
+
+```ts
+{ url: string; payload: Record<string, unknown>; merchantId: string; eventType: string; deliveryId: string }
 ```
 
-### Planned / platform contract routes
-
-The following endpoints are part of the PortIOPay notification platform contract and may be implemented in `src/shared/router.ts` as the API surface grows:
-
-| Method | Path | Description |
-|--------|------|-------------|
-| `POST` | `/api/v1/notifications/send` | Enqueue multi-channel notification (SMS, email, push) |
-| `POST` | `/api/v1/webhooks/register` | Register merchant webhook endpoint |
-| `POST` | `/api/v1/webhooks/test` | Send test payload to a registered webhook |
-
-## Background processors
-
-Most delivery work runs asynchronously via BullMQ workers started at boot:
-
-| Processor | Queue | Purpose |
-|-----------|-------|---------|
-| `SmsProcessor` | `sms` | Sends SMS via Twilio with idempotency-key deduplication |
-| `WebhookProcessor` | `webhooks` | POSTs JSON payloads to merchant webhook URLs |
-| `WebhookProcessor` (DLQ) | `webhooks-dlq` | Stores webhooks that exhausted retry attempts |
-
-Jobs are enqueued via `SmsProcessor.enqueue()` and `WebhookProcessor.enqueue()`. Upstream services (e.g. payment event bus) push jobs into Redis queues rather than calling send endpoints directly.
-
-### SMS (`SmsProcessor`)
-
-- **Idempotency:** Jobs use `idempotencyKey` as BullMQ `jobId`; Redis key `sms:delivered:{key}` prevents duplicate sends on retry (NP-2038)
-- **Retries:** 3 attempts, exponential backoff starting at 1s
-- **Concurrency:** 10 workers
-
-```typescript
-await smsProcessor.enqueue({
-  to: '+15559876543',
-  message: 'Your payment was received.',
-  merchantId: 'merch_123',
-  idempotencyKey: 'pay_evt_unique_id',
-});
-```
-
-### Webhooks (`WebhookProcessor`)
-
-- **Backpressure:** Refuses new jobs when queue depth ≥ 50,000 (NP-2033)
-- **Retries:** 5 attempts, exponential backoff starting at 2s
-- **Headers:** `X-PortIOPay-Delivery`, `X-PortIOPay-Event`
-- **Timeout:** 10s per delivery attempt
-
-```typescript
-await webhookProcessor.enqueue({
-  url: 'https://merchant.example/webhooks/portiopay',
-  payload: { event: 'payment.completed', amount: 1000 },
-  merchantId: 'merch_123',
-  eventType: 'payment.completed',
-  deliveryId: 'dlv_unique_id',
-});
-```
+Webhook requests include headers `X-PortIOPay-Delivery` and `X-PortIOPay-Event`, with a 10s timeout.
 
 ## Project structure
 
 ```
-notification-service/
-├── src/
-│   ├── index.ts              # Express app entry point; starts workers
-│   ├── shared/
-│   │   ├── router.ts         # HTTP route definitions
-│   │   ├── redis.ts          # Redis / BullMQ connection
-│   │   └── logger.ts         # Structured logging (Pino)
-│   ├── sms/
-│   │   └── SmsProcessor.ts   # Twilio SMS worker
-│   └── webhook/
-│       └── WebhookProcessor.ts  # Webhook delivery worker + DLQ
-├── CODEOWNERS
-├── package.json
-└── tsconfig.json
+src/
+  index.ts                    # Express app, starts processors
+  sms/SmsProcessor.ts         # Twilio + BullMQ SMS worker
+  webhook/WebhookProcessor.ts # HTTP webhook delivery + DLQ
+  shared/
+    router.ts                 # HTTP routes
+    redis.ts                  # ioredis client (BullMQ)
+    logger.ts                 # Pino logger
 ```
-
-## Scripts
-
-| Command | Description |
-|---------|-------------|
-| `npm run dev` | Start with hot reload (`tsx watch`) |
-| `npm run build` | Compile TypeScript to `dist/` |
-| `npm start` | Run compiled output (`node dist/index.js`) |
-| `npm test` | Run Jest test suite |
-| `npm run test:coverage` | Run tests with coverage report |
-| `npm run lint` | ESLint on `src/` |
 
 ## Deployment
 
-The service is a stateless Node.js process that requires a reachable Redis instance and Twilio credentials. This repository does not include a `Dockerfile` or Kubernetes manifests — deploy as a standard Node.js service (ECS, Kubernetes, VM, etc.).
+This repository ships application code only; deploy it as a stateless Node.js service with a managed Redis instance.
 
-### Build and run
+### Recommended production setup
+
+1. **Build** — `npm ci && npm run build` in CI.
+2. **Image** — Use a Node 20 slim base image; set `CMD ["node", "dist/index.js"]`.
+3. **Config** — Inject environment variables from your secrets manager (Twilio, Redis host/port).
+4. **Redis** — Use a highly available Redis cluster; BullMQ requires `maxRetriesPerRequest: null` on the client (already set in `src/shared/redis.ts`).
+5. **Health checks** — Probe `GET /health` on the service port.
+6. **Scaling** — Run multiple replicas for HTTP; coordinate BullMQ worker concurrency per replica (`SmsProcessor`: 10, `WebhookProcessor`: 50) to avoid overwhelming Twilio or merchant endpoints.
+7. **Observability** — Structured JSON logs via Pino; alert on DLQ growth and `Webhook queue at capacity` errors.
+
+Example container run (after build):
 
 ```bash
-npm ci
-npm run build
-npm start
+docker build -t notification-service .
+docker run --rm -p 3001:3001 \
+  -e REDIS_HOST=redis.example.com \
+  -e TWILIO_ACCOUNT_SID=... \
+  -e TWILIO_AUTH_TOKEN=... \
+  -e TWILIO_FROM_NUMBER=+1... \
+  notification-service
 ```
 
-Set `PORT`, `REDIS_HOST`, `REDIS_PORT`, and Twilio variables in your deployment environment (Kubernetes secrets, ECS task definition, etc.).
-
-### Health checks
-
-Configure your load balancer or orchestrator to probe:
-
-```
-GET /health
-```
-
-A `200` response with `"status":"ok"` indicates the process is running. For deeper readiness, ensure Redis connectivity (workers cannot process jobs if Redis is unavailable).
-
-### Operational notes
-
-- **Redis** must be highly available; all job state lives in Redis.
-- **Concurrency**: SMS workers run 10 concurrent jobs; webhook workers run 50.
-- **Backpressure**: Webhook intake pauses when queue depth reaches 50,000 jobs.
-- **Idempotency**: SMS retries check a Redis delivery receipt (`sms:delivered:{key}`) to avoid duplicate sends.
-- Run at least **2 replicas** for availability in production.
-- Monitor BullMQ queue depth for `webhooks` and `sms`; alert on DLQ growth (`webhooks-dlq`).
-
-### CI
-
-Pull requests run the shared **Claude Code Review** workflow (`.github/workflows/claude-review.yml`) from `portio-pay-demo/platform-workflows`.
+Deploy to Kubernetes, ECS, or your platform of choice using the same env vars and health probe path.
 
 ## Ownership
 
-Defined in [`CODEOWNERS`](./CODEOWNERS):
+Code ownership is defined in [`CODEOWNERS`](./CODEOWNERS):
 
 | Path | Reviewers |
 |------|-----------|
 | `*` | `@notifications-team` |
 | `src/sms/` | `@sms-leads`, `@notifications-team` |
-| `src/email/` | `@email-leads`, `@notifications-team` |
+| `src/webhook/` | `@notifications-team` |
+| `src/email/` | `@email-leads`, `@notifications-team` (planned) |
 
-| | |
-|---|---|
-| Team | PortIOPay Payments |
-| On-call | PagerDuty service `portioapay-notifications-prod` |
+- **Team:** PortIOPay Payments
+- **On-call:** PagerDuty `portioapay-notifications-prod`
 
-Pull requests require approval from the relevant code owners listed in `CODEOWNERS`.
-
-## Related fixes
-
-Recent reliability improvements referenced in source:
-
-- **NP-6 / NP-2033**: Webhook dead-letter queue and backpressure (no silent event drops)
-- **NP-2032**: Memory-safe webhook processor (no closure leak on retry)
-- **NP-2038**: SMS idempotency check before retry to prevent duplicate sends
+Pull requests require approval from the listed code owners.
