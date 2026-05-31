@@ -6,5 +6,8 @@
 # SMS provider integration — requires sms-leads sign-off
 src/sms/ @sms-leads @notifications-team
 
-# Email templates and provider — requires email-leads sign-off
+# Webhook delivery
+src/webhook/ @notifications-team
+
+# Email templates and provider — requires email-leads sign-off (planned)
 src/email/ @email-leads @notifications-team
