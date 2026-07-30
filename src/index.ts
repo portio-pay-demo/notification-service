@@ -18,10 +18,9 @@ app.get('/health', (_req, res) => {
 
 async function start() {
   const webhookProcessor = new WebhookProcessor();
-  const smsProcessor = new SmsProcessor();
+  // Note: SmsProcessor is now initialized in the router to handle /notifications/send endpoint
 
   await webhookProcessor.start();
-  await smsProcessor.start();
 
   app.listen(PORT, () => {
     console.log(`notification-service listening on :${PORT}`);
