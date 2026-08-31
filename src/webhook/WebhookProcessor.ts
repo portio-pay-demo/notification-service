@@ -55,6 +55,13 @@ export class WebhookProcessor {
     logger.info('WebhookProcessor started');
   }
 
+  async close() {
+    await this.worker.close();
+    await this.queue.close();
+    await this.dlq.close();
+    logger.info('WebhookProcessor stopped');
+  }
+
   async enqueue(job: WebhookJob) {
     const depth = await this.queue.count();
     if (depth >= this.MAX_QUEUE_DEPTH) {
