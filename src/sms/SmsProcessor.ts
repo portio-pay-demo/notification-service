@@ -46,6 +46,12 @@ export class SmsProcessor {
     logger.info('SmsProcessor started');
   }
 
+  async close() {
+    await this.worker.close();
+    await this.queue.close();
+    logger.info('SmsProcessor stopped');
+  }
+
   async enqueue(job: SmsJob) {
     await this.queue.add('send-sms', job, {
       jobId: job.idempotencyKey, // Deduplication by idempotency key
